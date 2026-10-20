@@ -55,6 +55,9 @@ from malwoverview.modules.greynoise import GreyNoiseExtractor
 from malwoverview.modules.whois_mod import WhoisExtractor
 from malwoverview.modules.multiplehash import MultipleHashExtractor
 from malwoverview.modules.urlscanio import URLScanIOExtractor
+from malwoverview.modules.scanmalware import (
+    ScanMalwareExtractor, clean_domain, clean_network, clean_scan_id, clean_sha256,
+)
 
 from malwoverview.utils.colors import mycolors, printr, strip_terminal_escapes
 from malwoverview.utils.session import NETWORK_FAILURE_HINTS, network_failure_hint, network_failure_message, failure_message
@@ -132,7 +135,7 @@ def main():
         USER_HOME_DIR = str(Path.home()) + '/'
         cv.windows = 0
 
-    parser = argparse.ArgumentParser(prog=None, description="Malwoverview is a first response tool for threat hunting written by Alexandre Borges. This version is " + __version__, usage="usage: python malwoverview.py -c <API configuration file> -d <directory> -o <0|1> -v <1-20> -V <virustotal arg> -a <1-13> -A <filename> -l <1-8> -L <hash|file type> -j <1-8> -J <URLhaus argument> -p <1-8> -P <polyswarm argument> -y <1-5> -Y <file name> -n <1-5> -N <argument> -m <1-9> -M <argument> -b <1-15> -B <arg> -x <1-9> -X <arg> --nist <1-6> --NIST <argument> -O <output directory> -ip <1-8> -IP <IP address> -vc <1-8> -VC <argument> -s <1-2> -S <arg> -ab <1> -AB <arg> -gn <1> -GN <arg> -wh <1-2> -WH <arg> -ct <1-2> -CT <domain> -u <1-5> -U <arg> --correlate-hash <hash> --extract-iocs <file> --yara <rules> --yara-target <target> --peinfo <target> --entropy-threshold <value> --sigcheck <target> --no-signature --sig-verify-mode <mode> --output-format text|json|csv --proxy <url> --quiet --verbose --no-cache --cache-ttl <seconds> --cache-stats --prune-cache --clear-cache --no-resolve --defang --no-ioc-filter --report html|pdf --interactive --tui --attack-map")
+    parser = argparse.ArgumentParser(prog=None, description="Malwoverview is a first response tool for threat hunting written by Alexandre Borges. This version is " + __version__, usage="usage: python malwoverview.py -c <API configuration file> -d <directory> -o <0|1> -v <1-20> -V <virustotal arg> -a <1-13> -A <filename> -l <1-8> -L <hash|file type> -j <1-8> -J <URLhaus argument> -p <1-8> -P <polyswarm argument> -y <1-5> -Y <file name> -n <1-5> -N <argument> -m <1-9> -M <argument> -b <1-15> -B <arg> -x <1-9> -X <arg> --nist <1-6> --NIST <argument> -O <output directory> -ip <1-8> -IP <IP address> -vc <1-8> -VC <argument> -s <1-2> -S <arg> -ab <1> -AB <arg> -gn <1> -GN <arg> -wh <1-2> -WH <arg> -ct <1-2> -CT <domain> -u <1-5> -U <arg> -sm <1-6> -SM <arg> --correlate-hash <hash> --extract-iocs <file> --yara <rules> --yara-target <target> --peinfo <target> --entropy-threshold <value> --sigcheck <target> --no-signature --sig-verify-mode <mode> --output-format text|json|csv --proxy <url> --quiet --verbose --no-cache --cache-ttl <seconds> --cache-stats --prune-cache --clear-cache --no-resolve --defang --no-ioc-filter --report html|pdf --interactive --tui --attack-map")
     
     malware_group = parser.add_argument_group('MALWARE OPTIONS', 'Malware analysis and intelligence query options')
     malware_group.add_argument('-c', '--config', dest='config', type=str, metavar="CONFIG FILE", default=(USER_HOME_DIR + '.malwapi.conf'), help='Use a custom config file to specify API\'s.')
@@ -174,6 +177,8 @@ def main():
     malware_group.add_argument('-CT', '--crtsharg', dest='crtsharg', type=str, default='', metavar="CRTSH_ARG", help='Provides the domain name for the -ct option.')
     malware_group.add_argument('-u', '--urlscanio', dest='urlscanio', type=int, default=0, metavar="URLSCANIO", help='URLSCAN.IO options: 1: Submit a URL for scanning; 2: Get scan result by UUID; 3: Search scans using Elasticsearch query syntax (e.g., "page.server:nginx", "filename:malware.exe", "task.tags:phishing", or a plain keyword); 4: Search scans by domain; 5: Search scans by IP.')
     malware_group.add_argument('-U', '--urlscanioarg', dest='urlscanioarg', type=str, default='', metavar="URLSCANIO_ARG", help='Provides argument for -u option from URLSCAN.IO. If "-u 1" then -U must be a URL to submit for scanning; If "-u 2" then -U must be a UUID (obtained from -u 1); If "-u 3" then -U must be an Elasticsearch query (e.g., "page.server:nginx", "task.tags:phishing"); If "-u 4" then -U must be a domain; If "-u 5" then -U must be an IP address.')
+    malware_group.add_argument('-sm', '--scanmalware', dest='scanmalware', type=int, default=0, metavar="SCANMALWARE", help='SCANMALWARE options, which query scanmalware.com and need no API key: 1: Submit a URL for scanning as an unlisted scan, which ScanMalware leaves out of its public search and scan listings but which anyone with the report link can open; 2: Get the scan summary (verdict, risk score and AI classification) for a scan ID; 3: Search scans using SMQL, the ScanMalware Query Language (e.g., "domain:paypal.com", "technology:WordPress AND country:RU", "has:malware"); 4: List the recent scans of a domain, taking a verdict only from a scan of the domain itself and listing scans of its subdomains and of pages that redirected to it as related; 5: Search scans of pages that contacted an IP address or a CIDR network; 6: Search scans of pages that loaded a response body (HTML, script, stylesheet or font) with the given SHA256.')
+    malware_group.add_argument('-SM', '--scanmalwarearg', dest='scanmalwarearg', type=str, default='', metavar="SCANMALWARE_ARG", help='Provides argument for -sm option from SCANMALWARE. If "-sm 1" then -SM must be a URL to submit for scanning; If "-sm 2" then -SM must be a scan ID (obtained from -sm 1, or from the last column of -sm 3 to 6); If "-sm 3" then -SM must be an SMQL query (e.g., "domain:paypal.com", "has:malware"); If "-sm 4" then -SM must be a domain; If "-sm 5" then -SM must be an IP address or a CIDR network; If "-sm 6" then -SM must be a SHA256 hash.')
     malware_group.add_argument('--correlate-hash', dest='correlate_hash', type=str, default='', metavar="HASH", help='Cross-service hash correlation: queries a hash across VirusTotal, Hybrid Analysis, Triage, and AlienVault producing a consolidated report.')
     malware_group.add_argument('--extract-iocs', dest='extract_iocs', type=str, default='', metavar="SOURCE", help='Extract IOCs (hashes, IPs, URLs, domains, emails, CVEs) from a file (.txt, .pdf, .eml) or URL (http/https).')
     malware_group.add_argument('--yara', dest='yara_rules', type=str, default='', metavar="RULES_FILE", help='YARA rules file to use for scanning.')
@@ -577,6 +582,8 @@ def main():
     whoisargx = args.whoisarg
     urlscaniox = args.urlscanio
     urlscanioargx = args.urlscanioarg
+    scanmalwarex = args.scanmalware
+    scanmalwareargx = args.scanmalwarearg
     correlate_hashx = args.correlate_hash
     extract_iocsx = args.extract_iocs
     yara_rulesx = args.yara_rules
@@ -601,6 +608,7 @@ def main():
         'whoisargx': whoisargx,
         'crtshargx': crtshargx,
         'urlscanioargx': urlscanioargx,
+        'scanmalwareargx': scanmalwareargx,
         'vulncheckarg': vulncheckarg,
         'nistarg': nistarg,
     }
@@ -655,6 +663,12 @@ def main():
         'us_gen':    (urlscaniox, 'urlscanioargx', [3], sanitize_general),
         'us_domain': (urlscaniox, 'urlscanioargx', [4], sanitize_domain),
         'us_ip':     (urlscaniox, 'urlscanioargx', [5], sanitize_ip),
+        'sm_url':    (scanmalwarex, 'scanmalwareargx', [1], sanitize_url),
+        'sm_id':     (scanmalwarex, 'scanmalwareargx', [2], clean_scan_id),
+        'sm_gen':    (scanmalwarex, 'scanmalwareargx', [3], sanitize_general),
+        'sm_domain': (scanmalwarex, 'scanmalwareargx', [4], clean_domain),
+        'sm_ip':     (scanmalwarex, 'scanmalwareargx', [5], clean_network),
+        'sm_hash':   (scanmalwarex, 'scanmalwareargx', [6], clean_sha256),
         'vc_cve':    (vulncheckoption, 'vulncheckarg', [3, 7, 8], sanitize_cve),
         'nist_cve':  (nistoption, 'nistarg', [2], sanitize_cve),
         'nist_gen':  (nistoption, 'nistarg', [1, 3, 4, 5], sanitize_general),
@@ -688,6 +702,7 @@ def main():
     whoisargx = _CLI_ARGVALUES['whoisargx']
     crtshargx = _CLI_ARGVALUES['crtshargx']
     urlscanioargx = _CLI_ARGVALUES['urlscanioargx']
+    scanmalwareargx = _CLI_ARGVALUES['scanmalwareargx']
     vulncheckarg = _CLI_ARGVALUES['vulncheckarg']
     nistarg = _CLI_ARGVALUES['nistarg']
 
@@ -757,6 +772,7 @@ def main():
         args.whois not in range(3),
         args.crtsh not in range(3),
         args.urlscanio not in range(6),
+        args.scanmalware not in range(7),
         args.nistoption not in range(7),
         args.vulncheckoption not in range(9),
     ]
@@ -780,6 +796,7 @@ def main():
         whoisx and whoisargx,
         crtshx and crtshargx,
         urlscaniox and urlscanioargx,
+        scanmalwarex and scanmalwareargx,
         correlate_hashx,
         extract_iocsx,
         yara_rulesx and yara_targetx,
@@ -812,6 +829,7 @@ def main():
     greynoise_ext = GreyNoiseExtractor(GREYNOISEAPI)
     whois_ext = WhoisExtractor()
     urlscanio_ext = URLScanIOExtractor(URLSCANIOAPI)
+    scanmalware_ext = ScanMalwareExtractor()
 
     llm_enricher = None
     llm_active_provider = args.llm_provider or LLM_PROVIDER
@@ -1097,6 +1115,17 @@ def main():
                 3: (urlscanio_ext.urlscanio_search, [urlscanioargx]),
                 4: (urlscanio_ext.urlscanio_domain, [urlscanioargx]),
                 5: (urlscanio_ext.urlscanio_ip, [urlscanioargx])
+            }
+        },
+        {
+            'flag': scanmalwarex,
+            'actions': {
+                1: (scanmalware_ext.scanmalware_submit, [scanmalwareargx]),
+                2: (scanmalware_ext.scanmalware_summary, [scanmalwareargx]),
+                3: (scanmalware_ext.scanmalware_search, [scanmalwareargx]),
+                4: (scanmalware_ext.scanmalware_domain, [scanmalwareargx]),
+                5: (scanmalware_ext.scanmalware_ip, [scanmalwareargx]),
+                6: (scanmalware_ext.scanmalware_hash, [scanmalwareargx])
             }
         },
     ]
